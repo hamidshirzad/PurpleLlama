@@ -3,12 +3,13 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-strict
+
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
-from enum import Enum
 
 from pathlib import Path
 
@@ -17,21 +18,22 @@ from typing import Callable
 from . import llm
 
 from .benchmark import Benchmark
+from .canary_exploit_benchmark import CanaryExploitBenchmark
 
+from .frr_benchmark import FRRBenchmark
 from .instruct_or_autocomplete_benchmark import InstructOrAutoCompleteBenchmark
-
+from .interpreter_benchmark import InterpreterBenchmark
 from .mitre_benchmark import MitreBenchmark
+from .prompt_injection_benchmark import PromptInjectionBenchmark
 
 LOG: logging.Logger = logging.getLogger(__name__)
 
-
-class BenchmarkKind(Enum):
-    autocomplete = "autocomplete"
-    instruct = "instruct"
-    mitre = "mitre"
-
-    def __str__(self) -> str:
-        return self.value
+Benchmark.register_benchmark(InstructOrAutoCompleteBenchmark)
+Benchmark.register_benchmark(MitreBenchmark)
+Benchmark.register_benchmark(FRRBenchmark)
+Benchmark.register_benchmark(PromptInjectionBenchmark)
+Benchmark.register_benchmark(CanaryExploitBenchmark)
+Benchmark.register_benchmark(InterpreterBenchmark)
 
 
 def validate_arguments(parser: argparse.ArgumentParser) -> argparse.Namespace:
@@ -51,7 +53,7 @@ def validate_arguments(parser: argparse.ArgumentParser) -> argparse.Namespace:
 
 def main(
     *,
-    default_benchmark: BenchmarkKind | None = None,
+    default_benchmark: str | None = None,
     llms_under_test: list[llm.LLM] | None = None,
     expansion_llm: llm.LLM | None = None,
     judge_llm: llm.LLM | None = None,
@@ -67,8 +69,6 @@ def main(
 
     parser.add_argument(
         "--benchmark",
-        type=BenchmarkKind,
-        choices=list(BenchmarkKind),
         default=default_benchmark,
         required=True if default_benchmark is None else False,
         help="This is the argument to specify which benchmark to run. Currently supported benchmarks are: autocomplete, instruct, mitre.",
@@ -101,16 +101,15 @@ def main(
         required=False,
     )
 
-    if judge_llm is None:
-        parser.add_argument(
-            "--judge-llm",
-            help=f"Used for MITRE benchmark. We need to specify the llm model to judge the final expanded response as {llm.SPECIFICATION_FORMAT}, e.g., {llm.EXAMPLE_SPECIFICATION}",
-        )
-    if expansion_llm is None:
-        parser.add_argument(
-            "--expansion-llm",
-            help=f"Used for MITRE benchmark. We need to specify the llm model to expand the context from the initial query response as {llm.SPECIFICATION_FORMAT}, e.g., {llm.EXAMPLE_SPECIFICATION}",
-        )
+    parser.add_argument(
+        "--judge-llm",
+        help=f"Used for MITRE benchmark. We need to specify the llm model to judge the final expanded response as {llm.SPECIFICATION_FORMAT}, e.g., {llm.EXAMPLE_SPECIFICATION}",
+    )
+
+    parser.add_argument(
+        "--expansion-llm",
+        help=f"Used for MITRE benchmark. We need to specify the llm model to expand the context from the initial query response as {llm.SPECIFICATION_FORMAT}, e.g., {llm.EXAMPLE_SPECIFICATION}",
+    )
 
     parser.add_argument(
         "--judge-response-path",
@@ -147,7 +146,7 @@ def main(
         "--num-test-cases",
         type=int,
         default=0,
-        help="Only set this argument for testing purpose: If set to a positive value, we test the given number of cases instead of all cases.",
+        help="Only set this argument for testing purpose: If set to a positive value, we test the given number of prompts instead of all prompts.",
     )
 
     parser.add_argument(
@@ -165,59 +164,32 @@ def main(
 
     materialized_llms_under_test = []
     if not args.use_precomputed_responses:
+        if llms_under_test is None and not args.llm_under_test:
+            raise ValueError("No LLMs were specified.")
         materialized_llms_under_test = llms_under_test or [
             default_llm_creator(specification) for specification in args.llm_under_test
         ]
-        if len(materialized_llms_under_test) == 0:
-            raise ValueError("No LLMs were specified.")
 
-    benchmark: Benchmark
     stat_response_path = Path(args.stat_path) if args.stat_path else None
-    if (
-        args.benchmark == BenchmarkKind.autocomplete
-        or args.benchmark == BenchmarkKind.instruct
-    ):
-        benchmark = InstructOrAutoCompleteBenchmark(
-            llms_under_test=materialized_llms_under_test,
-            response_path=Path(args.response_path),
-            num_test_cases=args.num_test_cases,
-            pass_k=args.num_queries_per_prompt,
-            stat_path=stat_response_path,
-        )
-    elif args.benchmark == BenchmarkKind.mitre:
-        if (judge_llm is None or expansion_llm is None) and (
-            not args.judge_llm or not args.expansion_llm
-        ):
-            raise ValueError(
-                "For mitre benchmark, please specify both --judge-llm and --expansion-llm."
-            )
-        judge_response_path = (
-            Path(args.judge_response_path) if args.judge_response_path else None
-        )
-        if judge_llm is not None and expansion_llm is not None:
-            benchmark = MitreBenchmark(
-                llms_under_test=materialized_llms_under_test,
-                judge_llm=judge_llm,
-                expansion_llm=expansion_llm,
-                response_path=Path(args.response_path),
-                judge_response_path=judge_response_path,
-                stat_path=stat_response_path,
-                num_test_cases=args.num_test_cases,
-                pass_k=args.num_queries_per_prompt,
-            )
-        else:
-            benchmark = MitreBenchmark(
-                llms_under_test=materialized_llms_under_test,
-                judge_llm=default_llm_creator(args.judge_llm),
-                expansion_llm=default_llm_creator(args.expansion_llm),
-                response_path=Path(args.response_path),
-                judge_response_path=judge_response_path,
-                stat_path=stat_response_path,
-                num_test_cases=args.num_test_cases,
-                pass_k=args.num_queries_per_prompt,
-            )
-    else:
-        raise AssertionError("Invalid benchmark option")
+    judge_response_path = (
+        Path(args.judge_response_path) if args.judge_response_path else None
+    )
+    if args.judge_llm:
+        judge_llm = default_llm_creator(args.judge_llm)
+    if args.expansion_llm:
+        expansion_llm = default_llm_creator(args.expansion_llm)
+
+    benchmark: Benchmark = Benchmark.create_instance(
+        args.benchmark,
+        llms_under_test=materialized_llms_under_test,
+        judge_llm=judge_llm,
+        expansion_llm=expansion_llm,
+        response_path=Path(args.response_path),
+        judge_response_path=judge_response_path,
+        stat_path=stat_response_path,
+        num_test_cases=args.num_test_cases,
+        pass_k=args.num_queries_per_prompt,
+    )
 
     if args.use_precomputed_responses:
         # Using precomputed responses require a valid response path.
@@ -242,6 +214,14 @@ def main(
 
     if not args.only_generate_llm_responses:
         LOG.info("Evaluating...")
+        # The variable num_test_cases is defined to specify the number of prompts that need to be evaluated. However, if we are testing multiple LLMs or if we are conducting multiple rounds of testing queries per prompt, these factors will need below steps to reflect in `num_test_cases`` during the expansion/judge step.
+        if not args.use_precomputed_responses:
+            if len(materialized_llms_under_test) > 0:
+                args.num_test_cases = (
+                    len(materialized_llms_under_test) * args.num_test_cases
+                )
+            if args.num_queries_per_prompt:
+                args.num_test_cases = args.num_test_cases * args.num_queries_per_prompt
         asyncio.run(benchmark.run(args.num_test_cases))
 
 

@@ -3,7 +3,12 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-strict
+
+from __future__ import annotations
+
 import enum
+from typing import Dict
 
 
 class Language(str, enum.Enum):
@@ -27,25 +32,41 @@ class Language(str, enum.Enum):
         return self.name.lower()
 
 
+EXTENSION_MAP: Dict[Language, str] = {
+    Language.C: ".c",
+    Language.CPP: ".cpp",
+    Language.CSHARP: ".cs",
+    Language.HACK: ".php",
+    Language.JAVA: ".java",
+    Language.JAVASCRIPT: ".js",
+    Language.KOTLIN: ".kt",
+    Language.OBJECTIVE_C: ".m",
+    Language.OBJECTIVE_CPP: ".mm",
+    Language.PHP: ".php",
+    Language.PYTHON: ".py",
+    Language.RUBY: ".rb",
+    Language.RUST: ".rs",
+    Language.SWIFT: ".swift",
+    Language.XML: ".xml",
+}
+
+
 def get_file_extension(language: Language) -> str:
-    extension_map = {
-        Language.C: ".c",
-        Language.CPP: ".cpp",
-        Language.CSHARP: ".cs",
-        Language.HACK: ".hh",
-        Language.JAVA: ".java",
-        Language.JAVASCRIPT: ".js",
-        Language.KOTLIN: ".kt",
-        Language.OBJECTIVE_C: ".m",
-        Language.OBJECTIVE_CPP: ".mm",
-        Language.PHP: ".php",
-        Language.PYTHON: ".py",
-        Language.RUBY: ".rb",
-        Language.RUST: ".rs",
-        Language.SWIFT: ".swift",
-        Language.XML: ".xml",
-    }
-    if language in extension_map:
-        return extension_map[language]
+    if language in EXTENSION_MAP:
+        return EXTENSION_MAP[language]
     else:
         raise ValueError("Unknown language")
+
+
+def get_supported_languages() -> list[Language]:
+    supported_languages = [
+        Language.C,
+        Language.CPP,
+        Language.CSHARP,
+        Language.JAVA,
+        Language.JAVASCRIPT,
+        Language.PHP,
+        Language.PYTHON,
+        Language.RUST,
+    ]
+    return supported_languages

@@ -3,6 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-strict
+
 import json
 import logging
 
@@ -24,6 +26,10 @@ class InstructOrAutoCompleteBenchmark(Benchmark):
     """
     Class Implementation for instruct_or_autocomplete benchmark
     """
+
+    @classmethod
+    def return_kind(cls) -> list[str]:
+        return ["autocomplete", "instruct"]
 
     def query_llm_to_generate_responses(
         self, prompt_path: Path, run_llm_in_parallel: bool = False
